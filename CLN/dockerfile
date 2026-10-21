@@ -1,0 +1,13 @@
+ARG CLN_VERSION=25.02
+FROM rust:1-bookworm AS build
+RUN apt-get update && apt-get install -y protobuf-compiler
+COPY . /src
+WORKDIR /src
+RUN cargo build --release -p vls-proxy --bin remote_hsmd_socket --features developer && cargo build --release -p vlsd --bin vlsd --features vls-protocol/developer,vls-protocol-signer/developer
+FROM polarlightning/clightning:${CLN_VERSION}
+ARG CLN_LIBEXEC=/usr/local/libexec/c-lightning
+COPY --from=build /src/target/release/vlsd /usr/local/bin/vlsd
+COPY --from=build /src/target/release/remote_hsmd_socket ${CLN_LIBEXEC}/remote_hsmd_socket.bin
+# small wrapper so the proxy reports the same version as lightningd
+RUN printf '#!/bin/sh\nexport VLS_CLN_VERSION=$(lightningd --version)\nexec %s/remote_hsmd_socket.bin "$@"\n' ${CLN_LIBEXEC} > ${CLN_LIBEXEC}/remote_hsmd_socket && chmod +x ${CLN_LIBEXEC}/remote_hsmd_socket
+ENV VLS_BIND=0.0.0.0 VLS_PORT=7701 VLS_NETWORK=regtest BITCOIND_RPC_URL=http://polaruser:polarpass@backend1:18443
